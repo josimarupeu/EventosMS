@@ -1,0 +1,137 @@
+version: "3.8"
+
+networks:
+  events-net:
+    driver: bridge
+
+services:
+
+  # ── 1. Config Server ──────────────────────────────────────
+  config-server:
+    build:
+      context: ./ms-config-server
+      dockerfile: Dockerfile
+    container_name: config-server
+    ports:
+      - "7075:7075"
+    environment:
+      SPRING_SECURITY_USER_NAME: root
+      SPRING_SECURITY_USER_PASSWORD: "123456"
+    networks:
+      - events-net
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider",
+             "http://root:123456@localhost:7075/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ── 2. Registry Server (Eureka) ───────────────────────────
+  registry-server:
+    build:
+      context: ./ms-registry-server
+      dockerfile: Dockerfile
+    container_name: registry-server
+    ports:
+      - "8095:8095"
+    environment:
+      SPRING_CONFIG_IMPORT: "optional:configserver:http://root:123456@config-server:7075"
+    depends_on:
+      config-server:
+        condition: service_healthy
+    networks:
+      - events-net
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider",
+             "http://localhost:8095/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ── 3. Gateway ────────────────────────────────────────────
+  gateway-server:
+    build:
+      context: ./ms-gateway-server
+      dockerfile: Dockerfile
+    container_name: gateway-server
+    ports:
+      - "9095:9095"
+    environment:
+      SPRING_CONFIG_IMPORT: "optional:configserver:http://root:123456@config-server:7075"
+      EUREKA_URI: "http://registry-server:8095/eureka"
+    depends_on:
+      registry-server:
+        condition: service_healthy
+    networks:
+      - events-net
+
+  # ── 4. ms-evento-service ──────────────────────────────────
+  ms-evento-service:
+    build:
+      context: ./ms-evento-service
+      dockerfile: Dockerfile
+    container_name: ms-evento-service
+    ports:
+      - "8096:8096"
+    environment:
+      SPRING_CONFIG_IMPORT: "optional:configserver:http://root:123456@config-server:7075"
+      EUREKA_URI: "http://registry-server:8095/eureka"
+      SPRING_DATASOURCE_URL: "jdbc:mysql://host.docker.internal:3306/ms_evento"
+      SPRING_DATASOURCE_USERNAME: "root"
+      SPRING_DATASOURCE_PASSWORD: ""
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: "com.mysql.cj.jdbc.Driver"
+      SPRING_JPA_HIBERNATE_DDL_AUTO: "update"
+      SPRING_JPA_DATABASE_PLATFORM: "org.hibernate.dialect.MySQLDialect"
+    depends_on:
+      registry-server:
+        condition: service_healthy
+    networks:
+      - events-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ── 5. ms-participants ────────────────────────────────────
+  ms-participants:
+    build:
+      context: ./ms-participants
+      dockerfile: Dockerfile
+    container_name: ms-participants
+    environment:
+      SPRING_CONFIG_IMPORT: "optional:configserver:http://root:123456@config-server:7075"
+      EUREKA_URI: "http://registry-server:8095/eureka"
+      SPRING_DATASOURCE_URL: "jdbc:mysql://host.docker.internal:3306/ms_participants"
+      SPRING_DATASOURCE_USERNAME: "root"
+      SPRING_DATASOURCE_PASSWORD: ""
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: "com.mysql.cj.jdbc.Driver"
+      SPRING_JPA_HIBERNATE_DDL_AUTO: "update"
+      SPRING_JPA_DATABASE_PLATFORM: "org.hibernate.dialect.MySQLDialect"
+    depends_on:
+      registry-server:
+        condition: service_healthy
+    networks:
+      - events-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ── 6. ms-regitro-service ─────────────────────────────────
+  ms-registro-service:
+    build:
+      context: ./ms-regitro-service
+      dockerfile: Dockerfile
+    container_name: ms-registro-service
+    environment:
+      SPRING_CONFIG_IMPORT: "optional:configserver:http://root:123456@config-server:7075"
+      EUREKA_URI: "http://registry-server:8095/eureka"
+      SPRING_DATASOURCE_URL: "jdbc:mysql://host.docker.internal:3306/ms_registro"
+      SPRING_DATASOURCE_USERNAME: "root"
+      SPRING_DATASOURCE_PASSWORD: ""
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: "com.mysql.cj.jdbc.Driver"
+      SPRING_JPA_HIBERNATE_DDL_AUTO: "update"
+      SPRING_JPA_DATABASE_PLATFORM: "org.hibernate.dialect.MySQLDialect"
+    depends_on:
+      registry-server:
+        condition: service_healthy
+    networks:
+      - events-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
